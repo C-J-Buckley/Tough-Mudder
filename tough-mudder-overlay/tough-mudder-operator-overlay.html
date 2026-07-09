@@ -2107,7 +2107,7 @@
 
       const LOCKER_NUMBERS = LOCKER_HASHES.map(([locker]) => locker);
       const LANE_COUNT = 27;
-      const ACTIVE_LOCKER_NUMBERS = LOCKER_NUMBERS.slice(0, LANE_COUNT);
+      const DEFAULT_LOCKER_NUMBERS = LOCKER_NUMBERS.slice(0, LANE_COUNT);
       const OUTFIT_COLORS = ["blue", "red", "green", "orange", "purple", "teal", "pink", "gold", "gray"];
       const PHASE_OVERRIDE_STARTED_AT = Date.now();
       const TRACK_WIDTH = 270;
@@ -2212,7 +2212,7 @@
       ];
 
       const SCHEDULE = [
-        { kind: "scene", sceneIndex: 0, start: 0, end: 120, label: "10:30 PM - 12:30 AM" },
+        { kind: "scene", sceneIndex: 0, start: 15, end: 120, label: "10:45 PM - 12:30 AM" },
         { kind: "break", sceneIndex: 1, start: 120, end: 135, label: "First 15 Min Break", copy: "Next: Course 2 starts 12:45 AM" },
         { kind: "scene", sceneIndex: 1, start: 135, end: 240, label: "12:45 AM - 2:30 AM" },
         { kind: "lunch", sceneIndex: 2, start: 240, end: 270, label: "30 Min Lunch", copy: "Next: Course 3 starts 3:00 AM" },
@@ -2576,6 +2576,10 @@
         return Math.max(0, Math.min(1, percent));
       }
 
+      function clampProgress(value) {
+        return Math.max(0, Math.min(1, value));
+      }
+
       function normalizePercent(value) {
         if (value === null || value === undefined || value === "") return null;
         const numeric = Number(value);
@@ -2590,20 +2594,175 @@
         return Number.isFinite(numeric) ? numeric : null;
       }
 
-      function externalOperatorValueFor(lockerNumber, index) {
-        const sources = [
+      function booleanMetric(value) {
+        if (value === null || value === undefined || value === "") return null;
+        if (typeof value === "boolean") return value;
+        if (typeof value === "number") return value !== 0;
+
+        const text = String(value).trim().toLowerCase().replace(/[\s-]+/g, "_");
+        const trueValues = new Set(["1", "true", "yes", "y", "active", "online", "working", "available", "present", "enabled", "live"]);
+        const falseValues = new Set(["0", "false", "no", "n", "inactive", "offline", "off_shift", "absent", "unavailable", "disabled", "hidden"]);
+        if (trueValues.has(text)) return true;
+        if (falseValues.has(text)) return false;
+        return null;
+      }
+
+      function externalOperatorSources() {
+        return [
           window.TOUGH_MUDDER_OPERATOR_PROGRESS,
+          window.TOUGH_MUDDER_OPERATOR_DATA,
           window.OPERATOR_PROGRESS,
           window.operatorProgress
         ];
+      }
+
+      function operatorCollectionFor(source) {
+        if (!source || typeof source !== "object") return source;
+        return source.operators ?? source.operatorData ?? source.progress ?? source.data ?? source;
+      }
+
+      function externalOperatorDataExists() {
+        return externalOperatorSources().some(source => operatorCollectionFor(source));
+      }
+
+      function lockerNumberFromOperatorValue(value) {
+        if (!value || typeof value !== "object") return null;
+        return numericMetric(
+          value.lockerNumber ??
+          value.locker_number ??
+          value.lockNumber ??
+          value.lock_number ??
+          value.locker ??
+          value.lock ??
+          value.number
+        );
+      }
+
+      function arrayUsesDefaultLockerOrder(collection) {
+        return Array.isArray(collection) &&
+          collection.length >= DEFAULT_LOCKER_NUMBERS.length &&
+          collection.every(item => lockerNumberFromOperatorValue(item) === null);
+      }
+
+      function externalOperatorValueFor(lockerNumber, index) {
+        const sources = externalOperatorSources();
 
         for (const source of sources) {
-          if (!source) continue;
-          const value = source[lockerNumber] ?? source[String(lockerNumber)] ?? source[index];
+          const collection = operatorCollectionFor(source);
+          if (!collection) continue;
+
+          if (Array.isArray(collection)) {
+            const matchedValue = collection.find(item => lockerNumberFromOperatorValue(item) === lockerNumber);
+            if (matchedValue !== undefined) return matchedValue;
+
+            if (arrayUsesDefaultLockerOrder(collection)) {
+              const indexedValue = collection[index];
+              if (indexedValue !== null && indexedValue !== undefined) return indexedValue;
+            }
+            continue;
+          }
+
+          if (typeof collection !== "object") continue;
+          const value = collection[lockerNumber] ?? collection[String(lockerNumber)];
           if (value !== null && value !== undefined) return value;
         }
 
         return null;
+      }
+
+      function parseLockerList(value) {
+        if (!value) return null;
+        const lockers = String(value)
+          .split(/[,\s]+/)
+          .map(locker => Number(locker))
+          .filter(locker => Number.isFinite(locker));
+        return lockers.length ? lockers : null;
+      }
+
+      function lockerSetFromParams(...keys) {
+        const params = new URLSearchParams(location.search);
+        for (const key of keys) {
+          const lockers = parseLockerList(params.get(key));
+          if (lockers) return new Set(lockers);
+        }
+        return null;
+      }
+
+      function lockerNumbersFromExternalData() {
+        const lockers = new Set();
+        externalOperatorSources().forEach(source => {
+          const collection = operatorCollectionFor(source);
+          if (!collection) return;
+
+          if (Array.isArray(collection)) {
+            collection.forEach(item => {
+              const locker = lockerNumberFromOperatorValue(item);
+              if (locker !== null) lockers.add(locker);
+            });
+            return;
+          }
+
+          if (typeof collection === "object") {
+            Object.keys(collection).forEach(key => {
+              const locker = Number(key);
+              if (Number.isFinite(locker)) lockers.add(locker);
+            });
+            Object.values(collection).forEach(item => {
+              const locker = lockerNumberFromOperatorValue(item);
+              if (locker !== null) lockers.add(locker);
+            });
+          }
+        });
+        return [...lockers].sort((a, b) => a - b);
+      }
+
+      function operatorActiveStateFor(value) {
+        if (value === null || value === undefined) return null;
+        if (typeof value !== "object") return true;
+
+        const inactive = booleanMetric(value.inactive ?? value.isInactive ?? value.is_inactive ?? value.hidden ?? value.disabled);
+        if (inactive !== null) return !inactive;
+
+        const active = booleanMetric(value.active ?? value.isActive ?? value.is_active ?? value.enabled ?? value.present ?? value.scheduled);
+        if (active !== null) return active;
+
+        const status = booleanMetric(value.status ?? value.state ?? value.operatorStatus ?? value.operator_status);
+        if (status !== null) return status;
+
+        return true;
+      }
+
+      function activeOperatorSlots() {
+        const activeSet = lockerSetFromParams("activeLockers", "active", "lockers");
+        const inactiveSet = lockerSetFromParams("inactiveLockers", "inactive");
+        const dataExists = externalOperatorDataExists();
+        const dataLockers = lockerNumbersFromExternalData();
+        const candidates = activeSet
+          ? [...activeSet].sort((a, b) => a - b)
+          : dataLockers.length
+            ? dataLockers
+            : DEFAULT_LOCKER_NUMBERS;
+
+        return candidates
+          .map(lockerNumber => {
+            const knownIndex = LOCKER_NUMBERS.indexOf(lockerNumber);
+            return {
+              lockerNumber,
+              index: knownIndex >= 0 ? knownIndex : DEFAULT_LOCKER_NUMBERS.indexOf(lockerNumber)
+            };
+          })
+          .filter(({ lockerNumber, index }) => {
+            if (index < 0) return false;
+            if (inactiveSet?.has(lockerNumber)) return false;
+            if (activeSet && !activeSet.has(lockerNumber)) return false;
+
+            const value = externalOperatorValueFor(lockerNumber, index);
+            const active = operatorActiveStateFor(value);
+            if (active !== null) return active;
+
+            return !dataExists;
+          })
+          .slice(0, LANE_COUNT);
       }
 
       function externalProgressFor(lockerNumber, index) {
@@ -2623,7 +2782,18 @@
 
       function externalHoursFor(lockerNumber, index) {
         const value = externalOperatorValueFor(lockerNumber, index);
-        const hours = numericMetric(value?.hours ?? value?.totalHours ?? value?.workedHours ?? value?.durationHours);
+        const hours = numericMetric(
+          value?.hours ??
+          value?.totalHours ??
+          value?.total_hours ??
+          value?.workedHours ??
+          value?.worked_hours ??
+          value?.durationHours ??
+          value?.duration_hours ??
+          value?.operatorHours ??
+          value?.laborHours ??
+          value?.productiveHours
+        );
         if (hours !== null) return hours;
 
         const params = new URLSearchParams(location.search);
@@ -2663,6 +2833,105 @@
         return .06 + step * .034 + group * .012;
       }
 
+      function phaseElapsedProgress(phase) {
+        if (!phase || !phase.durationMinutes) return 0;
+        const elapsedMinutes = phase.durationMinutes - (phase.remainingMs || 0) / 60000;
+        return clampProgress(elapsedMinutes / phase.durationMinutes);
+      }
+
+      function courseHourRanges() {
+        const sceneItems = SCHEDULE.filter(item => item.kind === "scene");
+        let start = 0;
+        return sceneItems
+          .map(item => {
+            const duration = (item.end - item.start) / 60;
+            const range = {
+              sceneIndex: item.sceneIndex,
+              start,
+              end: start + duration,
+              duration
+            };
+            start += duration;
+            return range;
+          });
+      }
+
+      function courseHourRange(sceneIndex) {
+        return courseHourRanges().find(range => range.sceneIndex === sceneIndex) || {
+          sceneIndex,
+          start: 0,
+          end: API_CONFIG.maxHours,
+          duration: API_CONFIG.maxHours
+        };
+      }
+
+      function totalCourseHours() {
+        const ranges = courseHourRanges();
+        return ranges.length ? ranges[ranges.length - 1].end : API_CONFIG.maxHours;
+      }
+
+      function activeHoursForPhase(phase) {
+        if (phase.kind === "pre") return 0;
+        if (phase.kind === "complete") return totalCourseHours();
+
+        if (phase.kind === "break" || phase.kind === "lunch") {
+          return courseHourRange(Math.max(0, phase.sceneIndex - 1)).end;
+        }
+
+        const range = courseHourRange(phase.sceneIndex);
+        return range.start + range.duration * phaseElapsedProgress(phase);
+      }
+
+      function runnerTimeOffset(index) {
+        const rowOffset = ((index % 9) - 4) * .01;
+        const groupOffset = Math.floor(index / 9) * .008;
+        return rowOffset + groupOffset;
+      }
+
+      function fallbackHoursFor(index, phase = phaseForNow()) {
+        const baseHours = activeHoursForPhase(phase);
+        if (phase.kind !== "scene") return baseHours;
+        return Math.max(0, Math.min(totalCourseHours(), baseHours));
+      }
+
+      function operatorHoursFor(lockerNumber, index, phase = phaseForNow()) {
+        const hours = externalHoursFor(lockerNumber, index);
+        if (hours !== null) return Math.max(0, Math.min(totalCourseHours(), hours));
+
+        const progress = externalProgressFor(lockerNumber, index);
+        if (progress !== null) return progress * totalCourseHours();
+
+        return fallbackHoursFor(index, phase);
+      }
+
+      function setExternalOperatorData(payload) {
+        const operators = payload?.operators ?? payload?.progress ?? payload?.data ?? payload;
+        if (!operators || typeof operators !== "object") return false;
+        window.TOUGH_MUDDER_OPERATOR_PROGRESS = operators;
+        return true;
+      }
+
+      function handleOperatorDataMessage(event) {
+        const allowedOrigins = new Set([location.origin, "https://robohub.apps.openai.org", "null"]);
+        if (!allowedOrigins.has(event.origin)) return;
+        const payload = event.data;
+        if (!payload || typeof payload !== "object") return;
+        if (payload.type !== "tough-mudder-operator-progress" && payload.type !== "operator-progress") return;
+        if (setExternalOperatorData(payload)) renderPhase(phaseForNow());
+      }
+
+      function progressFromHoursForCourse(hours, sceneIndex) {
+        const range = courseHourRange(sceneIndex);
+        if (hours <= range.start) return 0;
+        if (hours >= range.end) return 1;
+        if (range.duration <= 0) return 0;
+        return clampProgress((hours - range.start) / range.duration);
+      }
+
+      function overallProgressFromHours(hours) {
+        return clampProgress(hours / totalCourseHours());
+      }
+
       function previewAwayFor(index) {
         return 6 + (index * 7) % 35;
       }
@@ -2671,12 +2940,16 @@
         return 10 + (index * 11) % 48;
       }
 
-      function operatorProgressEntries() {
-        return ACTIVE_LOCKER_NUMBERS.map((lockerNumber, index) => ({
-          lockerNumber,
-          index,
-          progress: externalProgressFor(lockerNumber, index) ?? previewProgressFor(index)
-        }));
+      function operatorProgressEntries(phase = phaseForNow()) {
+        return activeOperatorSlots().map(({ lockerNumber, index }) => {
+          const hours = operatorHoursFor(lockerNumber, index, phase);
+          return {
+            lockerNumber,
+            index,
+            hours,
+            progress: overallProgressFromHours(hours)
+          };
+        });
       }
 
       function formatHours(hours) {
@@ -2707,12 +2980,12 @@
         return OUTFIT_COLORS[index % OUTFIT_COLORS.length];
       }
 
-      function rankedOperatorEntries() {
-        return operatorProgressEntries()
+      function rankedOperatorEntries(phase = phaseForNow()) {
+        return operatorProgressEntries(phase)
           .sort((a, b) => b.progress - a.progress || a.index - b.index)
           .map((entry, index) => ({
             ...entry,
-            hours: externalHoursFor(entry.lockerNumber, entry.index) ?? entry.progress * API_CONFIG.targetHours,
+            hours: entry.hours,
             sessions: externalSessionsFor(entry.lockerNumber, entry.index) ?? Math.min(SCENES.length, Math.ceil(entry.progress * SCENES.length)),
             away: externalAwayFor(entry.lockerNumber, entry.index) ?? previewAwayFor(entry.index),
             setup: externalSetupFor(entry.lockerNumber, entry.index) ?? previewSetupFor(entry.index),
@@ -2722,7 +2995,7 @@
       }
 
       function courseFinishProgress(sceneIndex) {
-        return (sceneIndex + 1) / SCENES.length;
+        return clampProgress(courseHourRange(sceneIndex).end / totalCourseHours());
       }
 
       function podiumCourseIndexForPhase(phase) {
@@ -2732,13 +3005,13 @@
         return phase.sceneIndex;
       }
 
-      function courseFinishers(sceneIndex) {
+      function courseFinishers(sceneIndex, phase = phaseForNow()) {
         const finishLine = courseFinishProgress(sceneIndex);
-        return rankedOperatorEntries().filter(entry => entry.progress >= finishLine);
+        return rankedOperatorEntries(phase).filter(entry => entry.progress >= finishLine);
       }
 
-      function leaderboardHtml() {
-        const rankedEntries = rankedOperatorEntries();
+      function leaderboardHtml(phase = phaseForNow()) {
+        const rankedEntries = rankedOperatorEntries(phase);
         const entries = rankedEntries.sort((a, b) => a.lockerNumber - b.lockerNumber);
 
         const rowsPerColumn = Math.ceil(entries.length / 3);
@@ -2752,7 +3025,7 @@
         }).join("");
       }
 
-      function podiumHtml(sceneIndex) {
+      function podiumHtml(sceneIndex, phase = phaseForNow()) {
         if (sceneIndex === null) return "";
 
         const podiumOrder = [
@@ -2760,7 +3033,7 @@
           { place: 1, label: "1st", blockHeight: 50 },
           { place: 3, label: "3rd", blockHeight: 25 }
         ];
-        const topThree = courseFinishers(sceneIndex).slice(0, 3);
+        const topThree = courseFinishers(sceneIndex, phase).slice(0, 3);
         if (topThree.length < 3) return "";
 
         return podiumOrder.map(slot => {
@@ -2770,10 +3043,11 @@
         }).join("");
       }
 
-      function operatorLayerHtml(scene) {
+      function operatorLayerHtml(scene, phase = phaseForNow()) {
         const routePoints = parseRoute(scene.route);
-        return ACTIVE_LOCKER_NUMBERS.map((lockerNumber, index) => {
-          const progress = externalProgressFor(lockerNumber, index) ?? previewProgressFor(index);
+        return activeOperatorSlots().map(({ lockerNumber, index }) => {
+          const hours = operatorHoursFor(lockerNumber, index, phase);
+          const progress = progressFromHoursForCourse(hours, phase.sceneIndex);
           const isIdle = progress <= .015;
           const laneIndex = index % LANE_COUNT;
           const point = pointAtProgress(routePoints, progress);
@@ -2787,7 +3061,7 @@
           const z = 120 + laneIndex;
           const spriteSize = 36;
           const stateClass = isIdle ? " is-idle" : "";
-          return `<div class="operator-sprite${stateClass}" data-locker-number="${lockerNumber}" data-outfit="${outfit}" data-lane="${laneIndex + 1}" data-progress="${progress.toFixed(3)}" style="--x:${x.toFixed(2)}%;--y:${y.toFixed(2)}%;--jitter-x:${jitterX}px;--jitter-y:${jitterY}px;--label-tilt:${labelTilt}deg;--runner-sheet:url('tough-mudder-operator-running-${outfit}.png');--idle-sheet:url('tough-mudder-operator-idle-${outfit}.png');--z:${z};--sprite-size:${spriteSize}px"><span class="operator-number">${lockerNumber}</span><span class="operator-runner"></span></div>`;
+          return `<div class="operator-sprite${stateClass}" data-locker-number="${lockerNumber}" data-outfit="${outfit}" data-lane="${laneIndex + 1}" data-hours="${hours.toFixed(2)}" data-progress="${progress.toFixed(3)}" style="--x:${x.toFixed(2)}%;--y:${y.toFixed(2)}%;--jitter-x:${jitterX}px;--jitter-y:${jitterY}px;--label-tilt:${labelTilt}deg;--runner-sheet:url('tough-mudder-operator-running-${outfit}.png');--idle-sheet:url('tough-mudder-operator-idle-${outfit}.png');--z:${z};--sprite-size:${spriteSize}px"><span class="operator-number">${lockerNumber}</span><span class="operator-runner"></span></div>`;
         }).join("");
       }
 
@@ -2817,12 +3091,36 @@
         return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
       }
 
+      function elapsedMinutesFromClock(value) {
+        if (!value) return null;
+        const match = String(value).trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]m?)?$/);
+        if (!match) return null;
+
+        let hours = Number(match[1]);
+        const minutes = Number(match[2] ?? 0);
+        const meridiem = match[3]?.[0];
+        if (!Number.isFinite(hours) || !Number.isFinite(minutes) || minutes < 0 || minutes > 59) return null;
+
+        if (meridiem === "p" && hours < 12) hours += 12;
+        if (meridiem === "a" && hours === 12) hours = 0;
+        if (!meridiem && hours === 24) hours = 0;
+        if (hours < 0 || hours > 23) return null;
+
+        const shiftStartMinutes = 22 * 60 + 30;
+        const clockMinutes = hours * 60 + minutes;
+        return clockMinutes >= shiftStartMinutes
+          ? clockMinutes - shiftStartMinutes
+          : clockMinutes + 1440 - shiftStartMinutes;
+      }
+
       function phaseForNow(now = new Date()) {
         const params = new URLSearchParams(location.search);
         const courseOverride = params.get("course") || params.get("scene");
         if (courseOverride) {
           const sceneIndex = Math.max(0, Math.min(SCENES.length - 1, Number(courseOverride) - 1));
-          return { kind: "scene", sceneIndex, label: "Preview override" };
+          const demoDurationMinutes = 10;
+          const elapsedInDemo = ((Date.now() - PHASE_OVERRIDE_STARTED_AT) / 60000) % demoDurationMinutes;
+          return phaseWithTiming({ kind: "scene", sceneIndex, start: 0, end: demoDurationMinutes, label: "Preview override" }, elapsedInDemo);
         }
 
         const phaseOverride = params.get("phase");
@@ -2840,16 +3138,26 @@
           return phaseWithTiming(overridePhase, overridePhase.start + elapsedInOverride);
         }
 
+        const clockOverride = elapsedMinutesFromClock(params.get("time") ?? params.get("clock"));
+        if (clockOverride !== null) {
+          const currentOverride = SCHEDULE.find(item => clockOverride >= item.start && clockOverride < item.end);
+          if (currentOverride) return phaseWithTiming(currentOverride, clockOverride);
+          if (clockOverride >= 480) {
+            return { kind: "complete", sceneIndex: 3, label: "Match complete", copy: "Next workday starts 10:45 PM" };
+          }
+          return { kind: "pre", sceneIndex: 0, label: "Pre-shift", copy: "Course opens at 10:45 PM" };
+        }
+
         const start = shiftStartFor(now);
         const elapsed = (now - start) / 60000;
         const current = SCHEDULE.find(item => elapsed >= item.start && elapsed < item.end);
         if (current) return phaseWithTiming(current, elapsed);
 
         if (elapsed >= 480) {
-          return { kind: "complete", sceneIndex: 3, label: "Match complete", copy: "Next workday starts 10:30 PM" };
+          return { kind: "complete", sceneIndex: 3, label: "Match complete", copy: "Next workday starts 10:45 PM" };
         }
 
-        return { kind: "pre", sceneIndex: 0, label: "Pre-shift", copy: "Course opens at 10:30 PM" };
+        return { kind: "pre", sceneIndex: 0, label: "Pre-shift", copy: "Course opens at 10:45 PM" };
       }
 
       function phaseKey(phase) {
@@ -2881,9 +3189,9 @@
         document.getElementById("lane-layer").innerHTML = laneLayerHtml(scene.route);
         document.getElementById("checkpoint-layer").innerHTML = scene.checkpoints.map(checkpointHtml).join("");
         document.getElementById("obstacle-layer").innerHTML = scene.obstacles.map(obstacleHtml).join("");
-        document.getElementById("operator-layer").innerHTML = operatorLayerHtml(scene);
-        document.getElementById("leaderboard-list").innerHTML = leaderboardHtml();
-        const podiumMarkup = podiumHtml(podiumCourseIndexForPhase(phase));
+        document.getElementById("operator-layer").innerHTML = operatorLayerHtml(scene, phase);
+        document.getElementById("leaderboard-list").innerHTML = leaderboardHtml(phase);
+        const podiumMarkup = podiumHtml(podiumCourseIndexForPhase(phase), phase);
         document.querySelector(".podium").hidden = !podiumMarkup;
         document.getElementById("podium-stands").innerHTML = podiumMarkup;
         document.getElementById("course-badge").textContent = scene.badge;
@@ -2910,9 +3218,11 @@
           return;
         }
 
+        document.getElementById("operator-layer").innerHTML = operatorLayerHtml(SCENES[phase.sceneIndex], phase);
         updateIntermissionCountdown(phase);
       }
 
+      window.addEventListener("message", handleOperatorDataMessage);
       renderPhase();
       scheduleGlacierRumble();
       setInterval(refreshOverlay, 1000);
