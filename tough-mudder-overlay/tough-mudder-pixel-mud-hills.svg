@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="192" viewBox="0 0 96 192" fill="none">
+  <defs>
+    <g id="mound-wide">
+      <path fill="#2f1a10" d="M8 6h16V0h48v6h16v8h8v16h-8v8H72v6H24v-6H8v-8H0V14h8z"/>
+      <path fill="#4a2818" d="M16 8h16V4h32v4h16v8h8v10h-8v6H64v6H32v-6H16v-6H8V16h8z"/>
+      <path fill="#8d572e" d="M24 10h12V6h24v4h12v8h8v6h-8v4H60v6H36v-6H24v-4h-8v-6h8z"/>
+      <path fill="#b8793e" d="M32 12h24v4h8v4H52v4H28v-4h4z"/>
+      <path fill="#d9a15d" d="M36 14h12v4H32v-4z"/>
+      <path fill="#6a3b20" d="M20 24h16v4H20zM56 24h20v4H56zM32 32h28v4H32z"/>
+      <path fill="#22130b" opacity=".65" d="M8 26h12v8H8zM76 24h12v8H76zM24 38h48v4H24z"/>
+    </g>
+    <g id="mound-offset">
+      <path fill="#2f1a10" d="M0 6h14V0h50v6h18v8h10v16H82v8H64v6H14v-6H0v-8h-6V14h6z"/>
+      <path fill="#563019" d="M8 8h18V4h30v4h18v8h8v10h-8v6H58v6H22v-6H8v-6H0V16h8z"/>
+      <path fill="#966032" d="M18 10h14V6h22v4h14v8h8v6h-8v4H56v6H28v-6H18v-4h-8v-6h8z"/>
+      <path fill="#bf8144" d="M28 12h22v4h10v4H46v4H22v-4h6z"/>
+      <path fill="#e0a767" d="M32 14h10v4H26v-4z"/>
+      <path fill="#6f4124" d="M12 24h18v4H12zM50 24h20v4H50zM24 32h32v4H24z"/>
+      <path fill="#23140c" opacity=".65" d="M0 26h14v8H0zM68 24h14v8H68zM18 38h48v4H18z"/>
+    </g>
+  </defs>
+
+  <g shape-rendering="crispEdges">
+    <g transform="translate(13 2)"><g transform="scale(.72 .72)"><use href="#mound-wide"/></g></g>
+    <g transform="translate(6 39)"><g transform="scale(.88 .84)"><use href="#mound-offset"/></g></g>
+    <g transform="translate(0 76)"><g transform="scale(1 .96)"><use href="#mound-wide"/></g></g>
+    <g transform="translate(8 119)"><g transform="scale(.84 .82)"><use href="#mound-offset"/></g></g>
+    <g transform="translate(17 158)"><g transform="scale(.64 .7)"><use href="#mound-wide"/></g></g>
+    <path fill="#2a170d" opacity=".45" d="M14 16h8v12h-8zM76 22h8v14h-8zM8 56h8v12H8zM78 72h8v14h-8zM4 100h8v14H4zM84 112h8v16h-8zM10 140h8v12h-8zM76 154h8v14h-8z"/>
+  </g>
+
+  <g stroke="#d49b5a" stroke-width="4" stroke-linecap="square" opacity=".72">
+    <path d="M30 18 C38 12 52 12 62 19"/>
+    <path d="M24 56 C36 49 56 49 72 57"/>
+    <path d="M14 96 C30 88 54 88 76 98"/>
+    <path d="M26 136 C38 130 56 130 70 137"/>
+    <path d="M34 180 C42 176 54 176 62 181"/>
+  </g>
+  <g stroke="#3b2013" stroke-width="3" stroke-linecap="square" opacity=".54">
+    <path d="M28 26 C38 23 52 23 64 27"/>
+    <path d="M20 68 C34 63 58 63 76 69"/>
+    <path d="M10 112 C28 106 58 106 82 114"/>
+    <path d="M22 148 C36 144 58 144 74 149"/>
+    <path d="M32 188 C42 184 54 184 64 189"/>
+  </g>
+</svg>
